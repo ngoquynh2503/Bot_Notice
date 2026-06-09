@@ -1,93 +1,68 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-import httpx
-import uvicorn
+import hashlib
+import json
+from typing import Dict, Any
 
-app = FastAPI()
 
-# Cấu hình thông tin cấu credentials từ SeaTalk
-APP_ID = "MjI4ODAyMzE0MzU0"
-APP_SECRET = "26TBZ02TEp4PypirR9tgI9q0gFDAtvbm"
+from flask import Flask, request
 
-async def get_seatalk_access_token():
-    """Hàm lấy Access Token từ SeaTalk Open Platform"""
-    url = "https://open.seatalk.io/oauth2/token"
-    payload = {
-        "app_id": APP_ID,
-        "app_secret": APP_SECRET
-    }
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(url, json=payload)
-            res_data = response.json()
-            return res_data.get("app_access_token")
-        except Exception as e:
-            print(f"Lỗi lấy Token: {e}")
-            return None
 
-async def reply_seatalk_message(employee_id: str, text_content: str):
-    """Hàm gửi tin nhắn phản hồi cho người dùng qua SeaTalk API"""
-    access_token = await get_seatalk_access_token()
-    if not access_token:
-        return
-        
-    url = "https://open.seatalk.io/messaging/v1/single/send"
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "employee_id": employee_id,
-        "message": {
-            "tag": "text",
-            "text": {"content": text_content}
-        }
-    }
-    async with httpx.AsyncClient() as client:
-        await client.post(url, headers=headers, json=payload)
+# settings
+SIGNING_SECRET = b"xxxx"
 
-@app.post("/webhook")
-async def seatalk_webhook(request: Request):
-    """Endpoint chính tiếp nhận cấu hình kiểm tra URL và Tin nhắn từ SeaTalk"""
-    try:
-        data = await request.json()
-        print(f"Dữ liệu nhận được: {data}")
-        
-        # 1. XỬ LÝ VERIFICATION CHALLENGE (Xác thực URL trên SeaTalk)
-        event_type = data.get("event_type")
-        
-        if event_type == "verification":
-            # Trích xuất mã challenge từ cấu trúc data.event hoặc lớp ngoài
-            event_obj = data.get("event", {})
-            challenge = event_obj.get("seatalk_challenge") or data.get("seatalk_challenge", "")
-            
-            return JSONResponse(content={"seatalk_challenge": challenge})
-            
-        # 2. XỬ LÝ TIN NHẮN ĐẾN TỪ NGƯỜI DÙNG
-        if event_type == "message_received":
-            event_obj = data.get("event", {})
-            sender_obj = data.get("sender", {})
-            
-            # Lấy ID nhân viên gửi tin nhắn
-            employee_id = event_obj.get("from_employee_id") or sender_obj.get("employee_id")
-            message_obj = event_obj.get("message", {})
-            
-            # Nếu là tin nhắn văn bản thường, tiến hành trả lời lại
-            if employee_id and message_obj.get("tag") == "text":
-                user_text = message_obj.get("text", {}).get("content", "")
-                
-                # Gọi hàm phản hồi bất đồng bộ (không làm nghẽn luồng webhook)
-                await reply_seatalk_message(employee_id, f"Bot_Notice (Python) đã nhận: {user_text}")
-                
-        return JSONResponse(content={"status": "success"})
-        
-    except Exception as e:
-        print(f"Lỗi hệ thống: {e}")
-        return JSONResponse(content={"error": str(e)}, status_code=500)
 
-@app.get("/")
-def read_root():
-    return {"message": "Bot_Notice đang chạy online bằng Python FastAPI!"}
+# event list
+# ref: https://open.seatalk.io/docs/list-of-events
+EVENT_VERIFICATION = "event_verification"
+NEW_BOT_SUBSCRIBER = "new_bot_subscriber"
+MESSAGE_FROM_BOT_SUBSCRIBER = "message_from_bot_subscriber"
+INTERACTIVE_MESSAGE_CLICK = "interactive_message_click"
+BOT_ADDED_TO_GROUP_CHAT = ”bot_added_to_group_chat"
+BOT_REMOVED_FROM_GROUP_CHAT = "bot_removed_from_group_chat"
+NEW_MENTIONED_MESSAGE_RECEIVED_FROM_GROUP_CHAT = "new_mentioned_message_received_from_group_chat"
 
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+app = Flask(__name__)
+
+
+
+
+def is_valid_signature(signing_secret: bytes, body: bytes, signature: str) -> bool:
+    # ref: https://open.seatalk.io/docs/server-apis-event-callback
+    return hashlib.sha256(body + signing_secret).hexdigest() == signature
+
+
+
+
+@app.route("/bot-callback", methods=["POST"])
+def bot_callback_handler():
+    body: bytes = request.get_data()
+    signature: str = request.headers.get("signature")
+    # 1. validate the signature
+    if not is_valid_signature(SIGNING_SECRET, body, signature):
+    return ""
+    # 2. handle events
+    data: Dict[str, Any] = json.loads(body)
+    event_type: str = data.get("event_type", "")
+    if event_type == EVENT_VERIFICATION:
+    return data.get("event")
+    elif event_type == NEW_BOT_SUBSCRIBER:
+    # fill with your own code
+    pass
+    elif event_type == MESSAGE_FROM_BOT_SUBSCRIBER:
+    # fill with your own code
+    pass
+    elif event_type == INTERACTIVE_MESSAGE_CLICK:
+    # fill with your own code
+    pass
+    elif event_type == BOT_ADDED_TO_GROUP_CHAT:
+    # fill with your own code
+    pass
+    elif event_type == BOT_REMOVED_FROM_GROUP_CHAT:
+    # fill with your own code
+    pass
+    elif event_type == NEW_MENTIONED_MESSAGE_RECEIVED_FROM_GROUP_CHAT:
+    # fill with your own code
+    pass
+    else:
+    pass
+    return ""
