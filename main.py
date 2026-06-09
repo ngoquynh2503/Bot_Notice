@@ -1,0 +1,93 @@
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+import httpx
+import uvicorn
+
+app = FastAPI()
+
+# Cấu hình thông tin cấu credentials từ SeaTalk
+APP_ID = "MjI4ODAyMzE0MzU0"
+APP_SECRET = "26TBZ02TEp4PypirR9tgI9q0gFDAtvbm"
+
+async def get_seatalk_access_token():
+    """Hàm lấy Access Token từ SeaTalk Open Platform"""
+    url = "https://open.seatalk.io/oauth2/token"
+    payload = {
+        "app_id": APP_ID,
+        "app_secret": APP_SECRET
+    }
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(url, json=payload)
+            res_data = response.json()
+            return res_data.get("app_access_token")
+        except Exception as e:
+            print(f"Lỗi lấy Token: {e}")
+            return None
+
+async def reply_seatalk_message(employee_id: str, text_content: str):
+    """Hàm gửi tin nhắn phản hồi cho người dùng qua SeaTalk API"""
+    access_token = await get_seatalk_access_token()
+    if not access_token:
+        return
+        
+    url = "https://open.seatalk.io/messaging/v1/single/send"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "employee_id": employee_id,
+        "message": {
+            "tag": "text",
+            "text": {"content": text_content}
+        }
+    }
+    async with httpx.AsyncClient() as client:
+        await client.post(url, headers=headers, json=payload)
+
+@app.post("/webhook")
+async def seatalk_webhook(request: Request):
+    """Endpoint chính tiếp nhận cấu hình kiểm tra URL và Tin nhắn từ SeaTalk"""
+    try:
+        data = await request.json()
+        print(f"Dữ liệu nhận được: {data}")
+        
+        # 1. XỬ LÝ VERIFICATION CHALLENGE (Xác thực URL trên SeaTalk)
+        event_type = data.get("event_type")
+        
+        if event_type == "verification":
+            # Trích xuất mã challenge từ cấu trúc data.event hoặc lớp ngoài
+            event_obj = data.get("event", {})
+            challenge = event_obj.get("seatalk_challenge") or data.get("seatalk_challenge", "")
+            
+            return JSONResponse(content={"seatalk_challenge": challenge})
+            
+        # 2. XỬ LÝ TIN NHẮN ĐẾN TỪ NGƯỜI DÙNG
+        if event_type == "message_received":
+            event_obj = data.get("event", {})
+            sender_obj = data.get("sender", {})
+            
+            # Lấy ID nhân viên gửi tin nhắn
+            employee_id = event_obj.get("from_employee_id") or sender_obj.get("employee_id")
+            message_obj = event_obj.get("message", {})
+            
+            # Nếu là tin nhắn văn bản thường, tiến hành trả lời lại
+            if employee_id and message_obj.get("tag") == "text":
+                user_text = message_obj.get("text", {}).get("content", "")
+                
+                # Gọi hàm phản hồi bất đồng bộ (không làm nghẽn luồng webhook)
+                await reply_seatalk_message(employee_id, f"Bot_Notice (Python) đã nhận: {user_text}")
+                
+        return JSONResponse(content={"status": "success"})
+        
+    except Exception as e:
+        print(f"Lỗi hệ thống: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@app.get("/")
+def read_root():
+    return {"message": "Bot_Notice đang chạy online bằng Python FastAPI!"}
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
